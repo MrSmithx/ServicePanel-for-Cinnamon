@@ -1,0 +1,65 @@
+{
+  "refresh-section": {
+    "type": "header",
+    "description": "Refresh Settings"
+  },
+
+  "refresh-interval": {
+    "type": "scale",
+    "default": 15,
+    "min": 5,
+    "max": 300,
+    "step": 1,
+    "units": " seconds",
+    "show-value": true,
+    "description": "Refresh Interval",
+    "tooltip": "Min. interval: 5s. Max. interval: 300s [5 min]"
+  },
+
+    "ui-section": {
+    "type": "header",
+    "description": "Interface Settings"
+  },
+
+    "show-header": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'Header'",
+    "tooltip": "Display the 'Header' in the Menu"
+  },
+
+  "show-edit": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'Edit Services'",
+    "tooltip": "Display 'Edit Services' in the Menu"
+  },
+
+  "show-system-monitor": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'System Monitor'",
+    "tooltip": "Display 'System Monitor' in the Menu"
+  },
+
+  "show-refresh": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'Refresh'",
+    "tooltip": "Display 'Refresh' in the Menu"
+  },
+
+    "show-restartAll": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'Restart All Services'",
+    "tooltip": "Display 'Restart All Services' in the Menu"
+  },
+
+  "show-footer": {
+    "type": "switch",
+    "default": true,
+    "description": "Show 'Last Updated'",
+    "tooltip": "Display 'Last updated' in the Menu"
+  }
+}
