@@ -90,13 +90,7 @@ class ServiceManagerApplet extends Applet.IconApplet {
     }
 
     checkPkexec() {
-        try {
-            let [ok] = GLib.spawn_command_line_sync("command -v pkexec");
-            return ok && ok.toString().trim().length > 0;
-        } catch (e) {
-            global.logError("pkexec check failed: " + e);
-            return false;
-        }
+        return GLib.find_program_in_path("pkexec") !== null;
     }
 
     onSettingsChanged() {
@@ -455,6 +449,8 @@ class ServiceManagerApplet extends Applet.IconApplet {
 
         this._lastUpdated = new Date();
         this.buildMenu();
+        this.menu.actor.queue_relayout();
+        this.menu.actor.queue_redraw();
     }
 
     _handleServiceResult(service, status, exists) {
@@ -486,9 +482,13 @@ class ServiceManagerApplet extends Applet.IconApplet {
             this._failureCount++;
 
         service.menuItem.label.set_style(style);
-        service.menuItem.label.text = `${icon}    ${service.name}`;
-        service.menuItem.actor.queue_relayout();
-        service.menuItem.actor.queue_redraw();
+        Mainloop.idle_add(() => {
+            if (service.menuItem?.label) {
+                service.menuItem.label.text = `${icon}    ${service.name}`;
+                service.menuItem.label.queue_relayout();
+            }
+            return false;
+        });
 
         // Enable/disable buttons
         if (service.startItem && service.stopItem && service.restartItem) {
@@ -506,6 +506,9 @@ class ServiceManagerApplet extends Applet.IconApplet {
                 service.restartItem.setSensitive(false);
             }
         }
+
+        service.menuItem.actor.set_x_expand(true);
+        service.menuItem.actor.queue_relayout();
 
         service.last = status;
     }
