@@ -1,7 +1,7 @@
 {
   "uuid": "service-panel@martyn",
   "name": "Service Monitor Applet",
-  "description": "Monitor Services [e.g. Pi-Hole, JellyFin, RustDesk and TailScale]",
+  "description": "Monitor Services\n\n[e.g. Pi-Hole, JellyFin, RustDesk, TailScale, ...etc]\n\nhttps://github.com/MrSmithx/ServicePanel-for-Cinnamon",
   "version": "1.0",
   "cinnamon-version": ["5.0", "5.2", "6.0"],
   "settings-schema": "~/.local/share/cinnamon/applets/service-panel@martyn/settings-schema.json"
