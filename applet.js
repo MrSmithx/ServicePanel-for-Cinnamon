@@ -16,8 +16,6 @@ class ServiceManagerApplet extends Applet.IconApplet {
 
         this.settings = new Settings.AppletSettings(this, metadata.uuid, instanceId);
 
-        this.pkexecAvailable = this.checkPkexec();
-
         this.settings.bind(
             "refresh-interval",
             "refreshInterval",
@@ -69,12 +67,10 @@ class ServiceManagerApplet extends Applet.IconApplet {
         this.set_applet_tooltip("Service Manager");
 
         this.services = this.loadServices() || [
-            { name: "Firewall", type: "ufw" },
-
-            { name: "Pi-Hole", type: "systemd", unit: "pihole-FTL" },
-            { name: "JellyFin", type: "systemd", unit: "jellyfin" },
-            { name: "RustDesk", type: "systemd", unit: "rustdesk" },
-            { name: "Tailscale", type: "systemd", unit: "tailscaled" }
+            { name: "Pi-Hole", unit: "pihole-FTL", last: null, lastRestart: 0, busy: false },
+            { name: "JellyFin", unit: "jellyfin", last: null, lastRestart: 0, busy: false },
+            { name: "RustDesk", unit: "rustdesk", last: null, lastRestart: 0, busy: false },
+            { name: "Tailscale", unit: "tailscaled", last: null, lastRestart: 0, busy: false }
         ];
 
         this._refreshTimer = null;
@@ -87,10 +83,6 @@ class ServiceManagerApplet extends Applet.IconApplet {
         this.buildMenu();
         this._menuBuilt = true;
         this.startLoop();
-    }
-
-    checkPkexec() {
-        return GLib.find_program_in_path("pkexec") !== null;
     }
 
     onSettingsChanged() {
@@ -122,7 +114,6 @@ class ServiceManagerApplet extends Applet.IconApplet {
         try {
             let data = this.services.map(s => ({
                 name: s.name,
-                type: s.type,
                 unit: s.unit
             }));
 
@@ -137,10 +128,17 @@ class ServiceManagerApplet extends Applet.IconApplet {
     }
 
     on_applet_clicked(event) {
-        if (event.get_button() !== 1) return;
+        if (event.get_button() !== 1)
+            return;
 
-        this.refresh(); // instant update when opening
         this.menu.toggle();
+
+        if (this.menu.isOpen) {
+            Mainloop.idle_add(() => {
+                this.refresh();
+                return false;
+            });
+        }
     }
 
     confirmAction(title, message, callback) {
@@ -332,15 +330,8 @@ class ServiceManagerApplet extends Applet.IconApplet {
 
     checkService(service) {
 
-        switch (service.type) {
-
-            case "ufw":
-                return this.checkUfw(service);
-
-            case "systemd":
-            default:
-                return this.checkSystemd(service);
-        }
+        if (service.unit === "ufw")
+            return this.checkUfw(service);
 
         let status = "unknown";
         let exists = false;
@@ -395,36 +386,6 @@ class ServiceManagerApplet extends Applet.IconApplet {
         this._handleServiceResult(service, status, exists);
     }
 
-    checkSystemd(service) {
-
-        let status = "unknown";
-        let exists = false;
-
-        let unit = service.unit.endsWith(".service")
-            ? service.unit
-            : service.unit + ".service";
-
-        try {
-            let [okList, stdoutList] =
-                GLib.spawn_command_line_sync(`systemctl list-unit-files ${unit}`);
-
-            if (okList && stdoutList.toString().includes(unit)) {
-                exists = true;
-
-                let [okActive, stdoutActive] =
-                    GLib.spawn_command_line_sync(`systemctl is-active ${unit}`);
-
-                status = (okActive && stdoutActive)
-                    ? stdoutActive.toString().trim()
-                    : "inactive";
-            }
-        } catch (e) {
-            global.logError(e);
-        }
-
-        this._handleServiceResult(service, status, exists);
-    }
-
     refresh() {
 
         this._failureCount = 0;
@@ -449,11 +410,10 @@ class ServiceManagerApplet extends Applet.IconApplet {
 
         this._lastUpdated = new Date();
         this.buildMenu();
-        this.menu.actor.queue_relayout();
-        this.menu.actor.queue_redraw();
     }
 
     _handleServiceResult(service, status, exists) {
+
         if (!service.menuItem || !service.menuItem.label) return;
 
         if (!exists) {
@@ -482,13 +442,10 @@ class ServiceManagerApplet extends Applet.IconApplet {
             this._failureCount++;
 
         service.menuItem.label.set_style(style);
-        Mainloop.idle_add(() => {
-            if (service.menuItem?.label) {
-                service.menuItem.label.text = `${icon}    ${service.name}`;
-                service.menuItem.label.queue_relayout();
-            }
-            return false;
-        });
+        service.menuItem.label.text = `${icon}    ${service.name}`;
+
+        this.menu.actor.queue_relayout();
+        this.menu.box.queue_relayout();
 
         // Enable/disable buttons
         if (service.startItem && service.stopItem && service.restartItem) {
@@ -507,9 +464,6 @@ class ServiceManagerApplet extends Applet.IconApplet {
             }
         }
 
-        service.menuItem.actor.set_x_expand(true);
-        service.menuItem.actor.queue_relayout();
-
         service.last = status;
     }
 
@@ -526,117 +480,83 @@ class ServiceManagerApplet extends Applet.IconApplet {
 
     runAction(service, action) {
 
-        if (!this.pkexecAvailable) {
-            if (!this._pkexecWarned) {
-                this._pkexecWarned = true;
-
-                this.confirmAction(
-                    "Missing dependency",
-                    "pkexec is not installed. Install policykit-1 to enable service control.",
-                    () => {}
-                );
-                 this.set_applet_tooltip("pkexec not found - cannot manage services");
-            }
-            return;
-        }
-
         if (service.busy)
             return;
 
-        service.busy = true;
+        if (service.unit === "ufw") {
 
-        switch (service.type) {
+            let command = null;
 
-            // --------------------
-            // UFW FIREWALL
-            // --------------------
-            case "ufw": {
+            switch (action) {
 
-                let command;
+                case "start":
+                    command = ["pkexec", "ufw", "enable"];
+                    break;
 
-                switch (action) {
-                    case "start":
-                        command = ["pkexec", "ufw", "enable"];
-                        break;
+                case "stop":
+                    command = ["pkexec", "ufw", "disable"];
+                    break;
 
-                    case "stop":
-                        command = ["pkexec", "ufw", "disable"];
-                        break;
-
-                    default:
-                        service.busy = false;
-                        return;
-                }
-
-                Util.spawn_async(command, () => {
-                    Mainloop.timeout_add_seconds(1, () => {
-                        service.busy = false;
-                        this.refresh();
-                        return false;
-                    });
-                });
-
-                return;
+                default:
+                    return;
             }
 
-            // --------------------
-            // SYSTEMD SERVICES
-            // --------------------
-            case "systemd":
-            default: {
+            service.busy = true;
 
-                let unit = service.unit.endsWith(".service")
-                    ? service.unit
-                    : service.unit + ".service";
+            Util.spawn_async(command, () => {
 
-                let command;
-
-                switch (action) {
-                    case "start":
-                    case "stop":
-                    case "restart":
-                        command = ["pkexec", "systemctl", action, unit];
-                        break;
-
-                    default:
-                        service.busy = false;
-                        return;
-                }
-
-                // UI feedback
-                if (service.menuItem?.label) {
-                    service.menuItem.label.text = `⏳ ${service.name}`;
-                    service.menuItem.label.set_style("opacity:0.6;");
-                }
-
-                if (service.startItem && service.stopItem && service.restartItem) {
-                    service.startItem.setSensitive(false);
-                    service.stopItem.setSensitive(false);
-                    service.restartItem.setSensitive(false);
-                }
-
-                // Failsafe timeout
-                let timeoutId = Mainloop.timeout_add_seconds(5, () => {
+                Mainloop.timeout_add_seconds(1, () => {
                     service.busy = false;
                     this.refresh();
                     return false;
                 });
 
-                Util.spawn_async(command, () => {
+            });
 
-                    if (timeoutId)
-                        Mainloop.source_remove(timeoutId);
-
-                    Mainloop.timeout_add_seconds(1, () => {
-                        service.busy = false;
-                        this.refresh();
-                        return false;
-                    });
-                });
-
-                return;
-            }
+            return;
         }
+
+        if (service.busy) return;
+
+        let unit = service.unit.endsWith('.service') ? service.unit : service.unit + '.service';
+
+        // Show busy state
+        if (service.menuItem && service.menuItem.label) {
+            service.menuItem.label.text = `⏳ ${service.name}`;
+            service.menuItem.label.set_style("opacity:0.6;");
+        }
+
+        if (service.startItem && service.stopItem && service.restartItem) {
+            service.startItem.setSensitive(false);
+            service.stopItem.setSensitive(false);
+            service.restartItem.setSensitive(false);
+        }
+
+        // Failsafe: always clear busy after timeout (covers cancel case)
+        let timeoutId = Mainloop.timeout_add_seconds(5, () => {
+            if (service.busy) {
+                service.busy = false;
+                this.refresh();
+            }
+            return false;
+        });
+
+        Util.spawn_async(
+            ["pkexec", "systemctl", action, unit],
+            () => {
+                // Clear timeout if command actually returned
+                if (timeoutId) {
+                    Mainloop.source_remove(timeoutId);
+                    timeoutId = null;
+                }
+
+                Mainloop.timeout_add_seconds(1, () => {
+                    service.busy = false;
+                    this.refresh();
+                    return false;
+                });
+            }
+        );
     }
 
     // --- Edit Services ---
